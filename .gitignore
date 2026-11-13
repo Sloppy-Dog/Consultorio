@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+~$*.docx
+# Planos gerados (dados de pacientes) não devem ir para o repositório
+saida/
