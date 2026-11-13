@@ -24,7 +24,7 @@ Uso:
   python gerar_plano.py ARQ.pdf --saida PASTA    -> define a pasta de saída
   python gerar_plano.py ARQ.pdf --sem-pdf        -> gera só o Word
 
-Os arquivos são salvos na pasta plano_alimentar/output (ou em --saida), e a
+Os arquivos são salvos na pasta Monta_Plano_Alimentar/output (ou em --saida), e a
 pasta é aberta automaticamente no final.
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ from docx.oxml.ns import nsdecls, qn
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELO_PADRAO = BASE_DIR / "modelo" / "Modelo_Plano_Alimentar.docx"
-SAIDA_PADRAO = BASE_DIR / "output"  # plano_alimentar/output
+SAIDA_PADRAO = BASE_DIR / "output"  # Monta_Plano_Alimentar/output
 
 NUM_OPCOES = 4
 # Larguras das colunas (em twips), iguais às do modelo original
@@ -465,7 +465,7 @@ def escolher_arquivos() -> list[Path]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Converte o PDF do Dietbox no plano alimentar personalizado.")
     ap.add_argument("entradas", nargs="*", help="PDF(s) do Dietbox ou pasta(s) contendo os PDFs")
-    ap.add_argument("--saida", type=Path, help="Pasta de saída (padrão: plano_alimentar/output)")
+    ap.add_argument("--saida", type=Path, help="Pasta de saída (padrão: Monta_Plano_Alimentar/output)")
     ap.add_argument("--modelo", type=Path, default=MODELO_PADRAO, help="Modelo Word (.docx)")
     ap.add_argument("--sem-pdf", action="store_true", help="Gera apenas o Word")
     ap.add_argument("--nao-abrir", action="store_true", help="Não abre a pasta de saída no final")
