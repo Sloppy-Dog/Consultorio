@@ -23,10 +23,14 @@ Uso:
   python gerar_plano.py PASTA_COM_PDFS           -> processa todos os PDFs da pasta
   python gerar_plano.py ARQ.pdf --saida PASTA    -> define a pasta de saída
   python gerar_plano.py ARQ.pdf --sem-pdf        -> gera só o Word
+
+Os arquivos são salvos na pasta plano_alimentar/output (ou em --saida), e a
+pasta é aberta automaticamente no final.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -43,6 +47,7 @@ from docx.oxml.ns import nsdecls, qn
 
 BASE_DIR = Path(__file__).resolve().parent
 MODELO_PADRAO = BASE_DIR / "modelo" / "Modelo_Plano_Alimentar.docx"
+SAIDA_PADRAO = BASE_DIR / "output"  # plano_alimentar/output
 
 NUM_OPCOES = 4
 # Larguras das colunas (em twips), iguais às do modelo original
@@ -389,13 +394,14 @@ def nome_arquivo_seguro(texto: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "-", texto).strip()
 
 
-def processar(pdf: Path, modelo: Path, pasta_saida: Path | None, gerar_pdf: bool) -> bool:
+def processar(pdf: Path, modelo: Path, pasta_saida: Path | None, gerar_pdf: bool) -> Path | None:
+    """Gera os arquivos e devolve a pasta onde foram salvos (ou None em caso de erro)."""
     print(f"\n>> {pdf.name}")
     try:
         plano = ler_plano_dietbox(pdf)
     except Exception as e:
         print(f"   [ERRO] Falha ao ler o PDF: {e}")
-        return False
+        return None
 
     print(f"   Paciente: {plano.paciente} | Data: {plano.data or '-'}")
     for r in plano.refeicoes:
@@ -404,7 +410,7 @@ def processar(pdf: Path, modelo: Path, pasta_saida: Path | None, gerar_pdf: bool
     for a in plano.avisos:
         print(f"   [AVISO] {a}")
 
-    saida = pasta_saida or pdf.parent
+    saida = (pasta_saida or SAIDA_PADRAO).resolve()
     saida.mkdir(parents=True, exist_ok=True)
     base = nome_arquivo_seguro(
         f"Plano Alimentar - {plano.paciente}" + (f" - {plano.data.replace('/', '-')}" if plano.data else ""))
@@ -413,7 +419,7 @@ def processar(pdf: Path, modelo: Path, pasta_saida: Path | None, gerar_pdf: bool
         gerar_docx(plano, modelo, docx_path)
     except PermissionError:
         print(f"   [ERRO] Não foi possível salvar {docx_path.name}. O arquivo está aberto no Word?")
-        return False
+        return None
     print(f"   [OK] Word: {docx_path}")
 
     if gerar_pdf:
@@ -423,8 +429,22 @@ def processar(pdf: Path, modelo: Path, pasta_saida: Path | None, gerar_pdf: bool
             print(f"   [OK] PDF ({via}): {pdf_path}")
         except Exception as e:
             print(f"   [ERRO] {e}")
-            return False
-    return True
+            return saida  # o Word foi gerado mesmo sem o PDF
+    return saida
+
+
+def abrir_pasta(pasta: Path) -> None:
+    """Abre a pasta no Explorador de Arquivos (Windows), Finder (Mac) ou gerenciador (Linux)."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(pasta)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(pasta)])
+        elif shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open", str(pasta)], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+    except Exception:
+        pass  # abrir a pasta é só uma conveniência
 
 
 def escolher_arquivos() -> list[Path]:
@@ -445,9 +465,10 @@ def escolher_arquivos() -> list[Path]:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Converte o PDF do Dietbox no plano alimentar personalizado.")
     ap.add_argument("entradas", nargs="*", help="PDF(s) do Dietbox ou pasta(s) contendo os PDFs")
-    ap.add_argument("--saida", type=Path, help="Pasta de saída (padrão: a mesma do PDF de origem)")
+    ap.add_argument("--saida", type=Path, help="Pasta de saída (padrão: plano_alimentar/output)")
     ap.add_argument("--modelo", type=Path, default=MODELO_PADRAO, help="Modelo Word (.docx)")
     ap.add_argument("--sem-pdf", action="store_true", help="Gera apenas o Word")
+    ap.add_argument("--nao-abrir", action="store_true", help="Não abre a pasta de saída no final")
     args = ap.parse_args()
 
     entradas = [Path(e) for e in args.entradas] or escolher_arquivos()
@@ -465,8 +486,13 @@ def main() -> None:
     elif not args.modelo.exists():
         print(f"Modelo não encontrado: {args.modelo}")
     else:
-        ok = sum(processar(p, args.modelo, args.saida, not args.sem_pdf) for p in pdfs)
-        print(f"\nConcluído: {ok} de {len(pdfs)} plano(s) gerado(s).")
+        pastas = [processar(p, args.modelo, args.saida, not args.sem_pdf) for p in pdfs]
+        geradas = list(dict.fromkeys(p for p in pastas if p))
+        print(f"\nConcluído: {sum(1 for p in pastas if p)} de {len(pdfs)} plano(s) gerado(s).")
+        for pasta in geradas:
+            print(f"Arquivos salvos em: {pasta}")
+            if not args.nao_abrir:
+                abrir_pasta(pasta)
 
     if not args.entradas:  # executado com duplo clique: mantém a janela aberta
         input("\nPressione Enter para sair...")

@@ -48,13 +48,15 @@ python plano_alimentar/gerar_plano.py "Plano alimentar ativo de Fulana.pdf"
 
 Opções:
 
-- `--saida PASTA`: pasta onde salvar os arquivos (padrão: a mesma pasta do PDF de origem).
+- `--saida PASTA`: salva os arquivos em outra pasta.
+- `--nao-abrir`: não abre a pasta de saída no final.
 - `--sem-pdf`: gera somente o Word.
 - `--modelo ARQ.docx`: usa outro modelo de Word.
 - É possível informar uma **pasta**. Nesse caso, o programa processa todos os PDFs
   da pasta que tenham "ativo" no nome.
 
-Os arquivos são gerados com o nome
+Os arquivos são salvos na pasta **`plano_alimentar/output`**, que é aberta
+automaticamente no final, com o nome
 `Plano Alimentar - <Paciente> - <dd-mm-aaaa>.docx` e `.pdf`.
 
 ### Modelo

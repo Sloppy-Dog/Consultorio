@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 ~$*.docx
 # Planos gerados (dados de pacientes) não devem ir para o repositório
-saida/
+plano_alimentar/output/*
+!plano_alimentar/output/.gitkeep
