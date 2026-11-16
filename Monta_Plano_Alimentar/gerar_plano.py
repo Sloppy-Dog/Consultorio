@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Gerador de Plano Alimentar personalizado
-=========================================
+Gerador de Plano Alimentar personalizado - versão 2
+====================================================
 
 Lê o PDF "Plano alimentar ativo" exportado do Dietbox e gera:
   1) o plano no modelo Word personalizado (capa + tabelas por refeição);
@@ -12,10 +12,16 @@ Regras de conversão:
   - Substituição 1      -> OPÇÃO 2
   - Substituição 2      -> OPÇÃO 3
   - Substituição 3      -> OPÇÃO 4
+  - Substituição 4      -> OPÇÃO 5 (novo na versão 2)
+  - A OPÇÃO 5 fica logo abaixo das opções 1 a 4: uma faixa "OPÇÃO 5" (mesma
+    cor do cabeçalho) seguida dos alimentos, ocupando as 4 colunas.
   - "Obs:" da refeição principal (ex.: "Composição do Almoço...") vira uma
     célula mesclada logo abaixo de todas as opções da refeição.
   - Refeição com apenas uma opção (ex.: Ceia) ocupa as 4 colunas mescladas.
+  - Refeição com 2 ou 3 opções: as colunas que sobram recebem "-".
   - A palavra "OU" (maiúscula) é destacada em negrito.
+  - Refeição muito longa para uma página tem a fonte reduzida para 12 pt
+    (ou 11 pt), para não ser cortada entre duas páginas.
 
 Uso:
   python gerar_plano.py                          -> abre janela para escolher o(s) PDF(s)
@@ -49,11 +55,19 @@ BASE_DIR = Path(__file__).resolve().parent
 MODELO_PADRAO = BASE_DIR / "modelo" / "Modelo_Plano_Alimentar.docx"
 SAIDA_PADRAO = BASE_DIR / "output"  # Monta_Plano_Alimentar/output
 
-NUM_OPCOES = 4
+VERSAO = "2.0"
+NUM_OPCOES = 4   # opções lado a lado (colunas OPÇÃO 1..4)
+MAX_OPCOES = 5   # a OPÇÃO 5 vai em linha própria, abaixo das demais
 # Larguras das colunas (em twips), iguais às do modelo original
 LARG_COLUNAS = [1919, 3184, 3215, 3697, 3129]
 COR_CABECALHO = "FFEBEB"
 TAM_FONTE = 28  # meio-pontos (28 = 14 pt), como no modelo
+# Se uma refeição não couber inteira numa página, a fonte dela é reduzida
+# (14 pt -> 12 pt -> 11 pt), como foi feito à mão no Café da Manhã do exemplo.
+TAMANHOS_FONTE = (28, 24, 22)
+ALTURA_UTIL = 7400  # altura (twips) disponível para uma refeição abaixo do cabeçalho
+LARG_CARACTERE = 0.4  # largura média de um caractere, em fração do tamanho da fonte
+_tam_atual = TAM_FONTE  # tamanho usado pela refeição que está sendo montada
 
 
 # --------------------------------------------------------------------------- #
@@ -70,6 +84,7 @@ class Refeicao:
     horario: str  # "07:30"
     nome: str     # "Café da manhã"
     opcoes: list[Opcao] = field(default_factory=list)
+    tamanho_fonte: int = TAM_FONTE  # meio-pontos
 
     @property
     def titulo(self) -> str:
@@ -173,12 +188,18 @@ def ler_plano_dietbox(caminho: Path) -> Plano:
 
     for r in refeicoes:
         r.opcoes = [o for o in r.opcoes if o.itens or o.obs]
-        if len(r.opcoes) > NUM_OPCOES:
+        if len(r.opcoes) > MAX_OPCOES:
             avisos.append(
-                f"'{r.nome}' tem {len(r.opcoes)} opções; o modelo comporta {NUM_OPCOES}. "
+                f"'{r.nome}' tem {len(r.opcoes)} opções; o modelo comporta {MAX_OPCOES}. "
                 f"As opções excedentes NÃO foram incluídas."
             )
-            r.opcoes = r.opcoes[:NUM_OPCOES]
+            r.opcoes = r.opcoes[:MAX_OPCOES]
+        r.tamanho_fonte = tamanho_fonte(r)
+        if r.tamanho_fonte != TAM_FONTE:
+            avisos.append(f"'{r.nome}' é longa: fonte reduzida para {r.tamanho_fonte / 2:g} pt "
+                          f"para caber inteira numa página.")
+            if altura_refeicao(r, r.tamanho_fonte) > ALTURA_UTIL:
+                avisos.append(f"'{r.nome}' pode não caber numa única página mesmo assim.")
         for n, o in enumerate(r.opcoes[1:], start=2):
             if o.obs:
                 avisos.append(f"'{r.nome}', opção {n}: observação incluída dentro da célula.")
@@ -191,14 +212,15 @@ def ler_plano_dietbox(caminho: Path) -> Plano:
 # --------------------------------------------------------------------------- #
 # Montagem do Word
 # --------------------------------------------------------------------------- #
-def _rpr(negrito: bool = False) -> str:
+def _rpr(negrito: bool = False, tam: int | None = None) -> str:
     b = "<w:b/><w:bCs/>" if negrito else ""
+    tam = tam or _tam_atual
     return (f'<w:rPr><w:rFonts w:cstheme="minorHAnsi"/>{b}'
-            f'<w:sz w:val="{TAM_FONTE}"/><w:szCs w:val="{TAM_FONTE}"/></w:rPr>')
+            f'<w:sz w:val="{tam}"/><w:szCs w:val="{tam}"/></w:rPr>')
 
 
-def _run(texto: str, negrito: bool = False) -> str:
-    return f'<w:r>{_rpr(negrito)}<w:t xml:space="preserve">{escape(texto)}</w:t></w:r>'
+def _run(texto: str, negrito: bool = False, tam: int | None = None) -> str:
+    return f'<w:r>{_rpr(negrito, tam)}<w:t xml:space="preserve">{escape(texto)}</w:t></w:r>'
 
 
 def _runs_com_ou(texto: str, negrito: bool = False) -> str:
@@ -263,7 +285,56 @@ def _obs_paragrafo(obs: str, manter: bool = False) -> str:
                 manter_com_proximo=manter)
 
 
+# --- Estimativa da altura de uma refeição (para escolher o tamanho da fonte) ---
+def _num_linhas(texto: str, largura: int, tam: int) -> int:
+    """Linhas ocupadas por um parágrafo numa célula de 'largura' twips."""
+    cabe = max(1, int((largura - 140) / (tam * 10 * LARG_CARACTERE)))
+    linhas, atual = 1, 0
+    for palavra in texto.split():
+        n = len(palavra)
+        if atual and atual + 1 + n > cabe:
+            linhas += 1 + (n - 1) // cabe
+            atual = n % cabe or cabe
+        else:
+            atual += n + (1 if atual else 0)
+    return linhas
+
+
+def _altura_celula(textos: list[str], largura: int, tam: int) -> int:
+    linha = tam * 10 * 1.32  # altura de uma linha em twips
+    return int(sum(_num_linhas(t, largura, tam) for t in textos) * linha + 160)
+
+
+def _textos(op: Opcao, com_obs: bool = True) -> list[str]:
+    return op.itens + (["Obs: " + op.obs] if com_obs and op.obs else [])
+
+
+def altura_refeicao(ref: Refeicao, tam: int) -> int:
+    L, total = LARG_COLUNAS, sum(LARG_COLUNAS[1:])
+    titulo = _altura_celula([ref.titulo], L[0], tam)
+    if len(ref.opcoes) == 1:
+        principal = _altura_celula(_textos(ref.opcoes[0], False), total, tam)
+    else:
+        principal = max(_altura_celula(_textos(op, i > 0), L[i + 1], tam)
+                        for i, op in enumerate(ref.opcoes[:NUM_OPCOES]))
+    altura = max(771, principal)
+    for op in ref.opcoes[NUM_OPCOES:]:
+        altura += 485 + _altura_celula(_textos(op), total, tam)
+    if ref.obs_principal:
+        altura += _altura_celula(["Obs: " + ref.obs_principal], total, tam)
+    return max(altura, titulo)
+
+
+def tamanho_fonte(ref: Refeicao) -> int:
+    """Maior fonte (em meio-pontos) com que a refeição cabe inteira numa página."""
+    for tam in TAMANHOS_FONTE:
+        if altura_refeicao(ref, tam) <= ALTURA_UTIL:
+            return tam
+    return TAMANHOS_FONTE[-1]
+
+
 def montar_tabela(plano: Plano) -> str:
+    global _tam_atual
     L = LARG_COLUNAS
     sem_borda = ('<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/>'
                  '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
@@ -284,33 +355,56 @@ def montar_tabela(plano: Plano) -> str:
                  for i, t in enumerate(titulos))
     linhas = [_linha(l1, 550, cabecalho=True), _linha(l2, 557, cabecalho=True)]
 
+    largura_total = sum(L[1:])
     for ref in plano.refeicoes:
+        _tam_atual = ref.tamanho_fonte
+        extras = ref.opcoes[NUM_OPCOES:]  # OPÇÃO 5 (em linha própria)
         tem_obs = bool(ref.obs_principal)
-        titulo = _par(_run(ref.titulo, True), "center", negrito=True, manter_com_proximo=tem_obs)
-        celulas = _celula(titulo, L[0], vmerge="restart" if tem_obs else None,
+        continua = tem_obs or bool(extras)  # há linhas abaixo da linha principal?
+        titulo = _par(_run(ref.titulo, True), "center", negrito=True, manter_com_proximo=continua)
+        celulas = _celula(titulo, L[0], vmerge="restart" if continua else None,
                           centro_vertical=True)
         if len(ref.opcoes) == 1:
             # opção única: ocupa as 4 colunas
-            celulas += _celula(_paragrafos_opcao(ref.opcoes[0], tem_obs), sum(L[1:]),
+            celulas += _celula(_paragrafos_opcao(ref.opcoes[0], continua), largura_total,
                                span=NUM_OPCOES)
         else:
             for i in range(NUM_OPCOES):
                 if i < len(ref.opcoes):
                     op = ref.opcoes[i]
-                    conteudo = _paragrafos_opcao(op, tem_obs)
+                    conteudo = _paragrafos_opcao(op, continua)
                     if i > 0 and op.obs:  # obs de substituição fica dentro da célula
-                        conteudo += _obs_paragrafo(op.obs, tem_obs)
-                else:
-                    conteudo = ""
-                celulas += _celula(conteudo, L[i + 1])
+                        conteudo += _obs_paragrafo(op.obs, continua)
+                    celulas += _celula(conteudo, L[i + 1])
+                else:  # coluna sem opção
+                    celulas += _celula(_par(_run("-"), "center"), L[i + 1],
+                                       centro_vertical=True)
         linhas.append(_linha(celulas, 771, nao_dividir=True))
 
+        # Linhas abaixo da principal: o título da refeição continua mesclado (vMerge)
+        def _continuacao() -> str:
+            return _celula(_par("", "center", negrito=True), L[0], vmerge="continue",
+                           centro_vertical=True)
+
+        for n, op in enumerate(extras, start=NUM_OPCOES + 1):
+            ultima = n == len(ref.opcoes) and not tem_obs
+            faixa = _celula(_par(_run(f"OPÇÃO {n}", True, TAM_FONTE), "center", negrito=True,
+                                 manter_com_proximo=True),
+                            largura_total, span=NUM_OPCOES, fundo=COR_CABECALHO,
+                            centro_vertical=True)
+            linhas.append(_linha(_continuacao() + faixa, 485, nao_dividir=True))
+            conteudo = _paragrafos_opcao(op, not ultima)
+            if op.obs:
+                conteudo += _obs_paragrafo(op.obs, not ultima)
+            linhas.append(_linha(_continuacao() + _celula(conteudo, largura_total,
+                                                          span=NUM_OPCOES),
+                                 None, nao_dividir=True))
+
         if tem_obs:
-            obs_row = (_celula(_par("", "center", negrito=True), L[0], vmerge="continue",
-                               centro_vertical=True)
-                       + _celula(_obs_paragrafo(ref.obs_principal), sum(L[1:]),
-                                 span=NUM_OPCOES))
+            obs_row = _continuacao() + _celula(_obs_paragrafo(ref.obs_principal),
+                                               largura_total, span=NUM_OPCOES)
             linhas.append(_linha(obs_row, None, nao_dividir=True))
+    _tam_atual = TAM_FONTE
 
     borda = '<w:{0} w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
     bordas = "".join(borda.format(b) for b in
@@ -463,13 +557,15 @@ def escolher_arquivos() -> list[Path]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Converte o PDF do Dietbox no plano alimentar personalizado.")
+    ap = argparse.ArgumentParser(
+        description=f"Converte o PDF do Dietbox no plano alimentar personalizado (versão {VERSAO}).")
     ap.add_argument("entradas", nargs="*", help="PDF(s) do Dietbox ou pasta(s) contendo os PDFs")
     ap.add_argument("--saida", type=Path, help="Pasta de saída (padrão: Monta_Plano_Alimentar/output)")
     ap.add_argument("--modelo", type=Path, default=MODELO_PADRAO, help="Modelo Word (.docx)")
     ap.add_argument("--sem-pdf", action="store_true", help="Gera apenas o Word")
     ap.add_argument("--nao-abrir", action="store_true", help="Não abre a pasta de saída no final")
     args = ap.parse_args()
+    print(f"Gerador de Plano Alimentar - versão {VERSAO}")
 
     entradas = [Path(e) for e in args.entradas] or escolher_arquivos()
     pdfs: list[Path] = []
