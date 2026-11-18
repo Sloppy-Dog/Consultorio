@@ -1,4 +1,4 @@
-# Monta Plano Alimentar (versão 2)
+# Monta Plano Alimentar (versão 3)
 
 O programa lê o PDF **"Plano alimentar ativo"** exportado do Dietbox e gera
 automaticamente o plano no **modelo Word personalizado**, já com a capa, e
@@ -13,12 +13,15 @@ uma **cópia em PDF**.
 | Substituição 2        | OPÇÃO 3     |
 | Substituição 3        | OPÇÃO 4     |
 | Substituição 4        | OPÇÃO 5     |
+| Substituição 5        | OPÇÃO 6     |
 
-- **Novo na versão 2:** planos com **5 opções**. As opções 1 a 4 ficam lado a
-  lado; a **OPÇÃO 5** vem logo abaixo, numa faixa com o título "OPÇÃO 5"
-  (mesma cor do cabeçalho) seguida dos alimentos, ocupando as 4 colunas.
-  Refeições com 4 opções continuam como antes, e os dois formatos podem
-  aparecer no mesmo plano.
+- Planos com **até 6 opções** por refeição. As opções 1 a 4 ficam lado a lado;
+  as opções 5 e 6 vêm logo abaixo, numa faixa com o título (mesma cor do
+  cabeçalho) seguida dos alimentos:
+  - com **5 opções**, a OPÇÃO 5 ocupa as 4 colunas (versão 2);
+  - com **6 opções**, a OPÇÃO 5 e a OPÇÃO 6 ficam lado a lado, cada uma
+    ocupando 2 colunas (novo na versão 3).
+- Refeições com 4, 5 e 6 opções podem aparecer no mesmo plano.
 
 - Cada refeição aparece como **NOME DA REFEIÇÃO – HHhMM** (ex.: `ALMOÇO – 12h30`).
 - A **Obs** da refeição principal (ex.: *Composição do Almoço…*) vira uma
