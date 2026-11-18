@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Gerador de Plano Alimentar personalizado - versão 3
+Gerador de Plano Alimentar personalizado - versão 4
 ====================================================
 
 Lê o PDF "Plano alimentar ativo" exportado do Dietbox e gera:
@@ -14,10 +14,14 @@ Regras de conversão:
   - Substituição 3      -> OPÇÃO 4
   - Substituição 4      -> OPÇÃO 5 (versão 2)
   - Substituição 5      -> OPÇÃO 6 (versão 3)
-  - As opções 5 e 6 ficam logo abaixo das opções 1 a 4: uma faixa com o título
-    (mesma cor do cabeçalho) seguida dos alimentos.
-      * só a OPÇÃO 5: ocupa as 4 colunas;
-      * OPÇÃO 5 e OPÇÃO 6: lado a lado, cada uma ocupando 2 colunas.
+  - Substituição 6      -> OPÇÃO 7 (versão 4)
+  - Substituição 7      -> OPÇÃO 8 (versão 4)
+  - As opções 5 a 8 formam um 2º bloco logo abaixo das opções 1 a 4: uma faixa
+    com os títulos (mesma cor do cabeçalho) seguida dos alimentos.
+      * 5 opções: a OPÇÃO 5 ocupa as 4 colunas;
+      * 6 opções: OPÇÃO 5 e OPÇÃO 6 lado a lado, cada uma com 2 colunas;
+      * 7 opções: OPÇÕES 5, 6 e 7 nas colunas 1 a 3; a 4ª coluna recebe "-";
+      * 8 opções: OPÇÕES 5 a 8, uma em cada coluna (como as opções 1 a 4).
   - "Obs:" da refeição principal (ex.: "Composição do Almoço...") vira uma
     célula mesclada logo abaixo de todas as opções da refeição.
   - Refeição com apenas uma opção (ex.: Ceia) ocupa as 4 colunas mescladas.
@@ -58,10 +62,9 @@ BASE_DIR = Path(__file__).resolve().parent
 MODELO_PADRAO = BASE_DIR / "modelo" / "Modelo_Plano_Alimentar.docx"
 SAIDA_PADRAO = BASE_DIR / "output"  # Monta_Plano_Alimentar/output
 
-VERSAO = "3.0"
+VERSAO = "4.0"
 NUM_OPCOES = 4   # opções lado a lado (colunas OPÇÃO 1..4)
-MAX_OPCOES = 6   # as opções 5 e 6 vão num bloco próprio, abaixo das demais
-OPCOES_POR_BLOCO = 2  # opções lado a lado em cada bloco extra (5 e 6)
+MAX_OPCOES = 8   # as opções 5 a 8 vão num 2º bloco, abaixo das opções 1 a 4
 # Larguras das colunas (em twips), iguais às do modelo original
 LARG_COLUNAS = [1919, 3184, 3215, 3697, 3129]
 COR_CABECALHO = "FFEBEB"
@@ -313,23 +316,31 @@ def _textos(op: Opcao, com_obs: bool = True) -> list[str]:
     return op.itens + (["Obs: " + op.obs] if com_obs and op.obs else [])
 
 
-def blocos_extras(ref: Refeicao) -> list[list[tuple[int, Opcao, int, int]]]:
-    """Agrupa as opções além da 4ª em blocos de até 2, lado a lado.
+def blocos_extras(ref: Refeicao) -> list[list[tuple[int | None, Opcao | None, int, int]]]:
+    """Organiza as opções além da 4ª (5 a 8) em blocos de 4 colunas.
 
-    Cada item é (número da opção, opção, colunas mescladas, largura em twips).
-    Uma opção sozinha ocupa as 4 colunas; duas dividem as colunas 1-2 e 3-4.
+    Cada item é (número da opção, opção, colunas mescladas, largura em twips);
+    número e opção valem None numa coluna vazia (recebe "-").
+      1 opção  -> ocupa as 4 colunas
+      2 opções -> 2 colunas cada
+      3 opções -> uma por coluna; a 4ª coluna fica com "-"
+      4 opções -> uma por coluna
     """
     L = LARG_COLUNAS
     extras = ref.opcoes[NUM_OPCOES:]
     blocos = []
-    for ini in range(0, len(extras), OPCOES_POR_BLOCO):
-        grupo = extras[ini:ini + OPCOES_POR_BLOCO]
+    for ini in range(0, len(extras), NUM_OPCOES):
+        grupo = extras[ini:ini + NUM_OPCOES]
         n0 = NUM_OPCOES + 1 + ini
         if len(grupo) == 1:
             blocos.append([(n0, grupo[0], NUM_OPCOES, sum(L[1:]))])
-        else:
+        elif len(grupo) == 2:
             blocos.append([(n0, grupo[0], 2, L[1] + L[2]),
                            (n0 + 1, grupo[1], 2, L[3] + L[4])])
+        else:
+            bloco = [(n0 + i, op, 1, L[i + 1]) for i, op in enumerate(grupo)]
+            bloco += [(None, None, 1, L[i + 1]) for i in range(len(grupo), NUM_OPCOES)]
+            blocos.append(bloco)
     return blocos
 
 
@@ -344,7 +355,7 @@ def altura_refeicao(ref: Refeicao, tam: int) -> int:
     altura = max(771, principal)
     for bloco in blocos_extras(ref):
         altura += 485 + max(_altura_celula(_textos(op), larg, tam)
-                            for _, op, _, larg in bloco)
+                            for _, op, _, larg in bloco if op)
     if ref.obs_principal:
         altura += _altura_celula(["Obs: " + ref.obs_principal], total, tam)
     return max(altura, titulo)
@@ -415,9 +426,12 @@ def montar_tabela(plano: Plano) -> str:
             ultima = b == len(extras) - 1 and not tem_obs
             faixa = conteudo = ""
             for n, op, span, larg in bloco:
-                faixa += _celula(_par(_run(f"OPÇÃO {n}", True, TAM_FONTE), "center",
-                                      negrito=True, manter_com_proximo=True),
+                rotulo = _run(f"OPÇÃO {n}", True, TAM_FONTE) if n else ""
+                faixa += _celula(_par(rotulo, "center", negrito=True, manter_com_proximo=True),
                                  larg, span=span, fundo=COR_CABECALHO, centro_vertical=True)
+                if op is None:  # coluna sem opção
+                    conteudo += _celula(_par(_run("-"), "center"), larg, centro_vertical=True)
+                    continue
                 pars = _paragrafos_opcao(op, not ultima)
                 if op.obs:
                     pars += _obs_paragrafo(op.obs, not ultima)
