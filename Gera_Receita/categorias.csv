@@ -1,0 +1,5 @@
+# Correções manuais da classificação (opcional).
+# Uma linha por receita: nome do arquivo PDF (ou título da receita) ; Doce ou Salgada
+# Linhas começando com # são ignoradas. Exemplo:
+# Bala_gelatinosa_de_Agar_Agar.pdf;Doce
+arquivo;categoria
